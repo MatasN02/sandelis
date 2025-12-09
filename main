@@ -1,0 +1,941 @@
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  createContext,
+  useContext,
+} from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Alert,
+  StyleSheet,
+  SafeAreaView,
+  ActivityIndicator,
+  Animated,
+} from "react-native";
+import { Camera, CameraView } from "expo-camera";
+import firebase from "firebase";
+
+const firebaseConfig = {
+
+  apiKey: "AIzaSyBkcd_ibtLOJptOEEY9fNq6CdcJ9WdttvE",
+
+  authDomain: "sandelys-app.firebaseapp.com",
+
+  projectId: "sandelys-app",
+
+  storageBucket: "sandelys-app.firebasestorage.app",
+
+  messagingSenderId: "749972117018",
+
+  appId: "1:749972117018:web:021c5d435e131b90d563a3",
+
+  measurementId: "G-HH0WTCH53P"
+
+};
+
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+/* ============== AUTH CONTEXT ============== */
+
+const AuthContext = createContext();
+const useAuth = () => useContext(AuthContext);
+
+/* ============== ROOT APP ============== */
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [initializing, setInitializing] = useState(true);
+
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((u) => {
+      setUser(u);
+      setInitializing(false);
+    });
+    return unsub;
+  }, []);
+
+  if (initializing) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#22c55e" />
+        <Text style={{ color: "#e5e7eb", marginTop: 8 }}>
+          Kraunama programa...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <AuthContext.Provider value={{ user }}>
+      <View style={{ flex: 1, backgroundColor: "#020617" }}>
+        {user ? <MainScreen /> : <AuthScreen />}
+      </View>
+    </AuthContext.Provider>
+  );
+}
+
+/* ============== PRISIJUNGIMAS / REGISTRACIJA ============== */
+
+function AuthScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isRegister, setIsRegister] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
+  }, [fadeAnim]);
+
+  const handleSubmit = async () => {
+    if (!email || !password) {
+      Alert.alert("Klaida", "Įvesk el. paštą ir slaptažodį.");
+      return;
+    }
+    setLoading(true);
+    try {
+      if (isRegister) {
+        await auth.createUserWithEmailAndPassword(email.trim(), password);
+      } else {
+        await auth.signInWithEmailAndPassword(email.trim(), password);
+      }
+    } catch (e) {
+      Alert.alert("Autentifikacijos klaida", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.authContainer}>
+      <Animated.View
+        style={[
+          styles.authCard,
+          {
+            opacity: fadeAnim,
+            transform: [
+              {
+                translateY: fadeAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [20, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <Text style={styles.appTitle}>Sandėlio valdymas</Text>
+        <Text style={styles.appSubtitle}>QR / Barkodų sistema</Text>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>El. paštas</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="darbuotojas@imone.lt"
+            placeholderTextColor="#6b7280"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            value={email}
+            onChangeText={setEmail}
+          />
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Slaptažodis</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor="#6b7280"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
+        </View>
+
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={handleSubmit}
+          disabled={loading}
+        >
+          <Text style={styles.primaryButtonText}>
+            {loading
+              ? "Prašome palaukti..."
+              : isRegister
+              ? "Registruotis"
+              : "Prisijungti"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{ marginTop: 12 }}
+          onPress={() => setIsRegister((prev) => !prev)}
+        >
+          <Text style={{ color: "#93c5fd", fontSize: 13, textAlign: "center" }}>
+            {isRegister
+              ? "Jau turi paskyrą? Prisijunk"
+              : "Neturi paskyros? Registruokis"}
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </SafeAreaView>
+  );
+}
+
+/* ============== PAGRINDINIS EKRANAS PO PRISIJUNGIMO ============== */
+
+function MainScreen() {
+  const { user } = useAuth();
+  const [tab, setTab] = useState("items");
+
+  const logout = () => auth.signOut();
+
+  const TabButton = ({ id, label }) => (
+    <TouchableOpacity
+      onPress={() => setTab(id)}
+      style={[
+        styles.tabButton,
+        tab === id && styles.tabButtonActive,
+      ]}
+    >
+      <Text
+        style={[
+          styles.tabButtonText,
+          tab === id && styles.tabButtonTextActive,
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <SafeAreaView style={styles.mainContainer}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Sandėlio valdymas</Text>
+          <Text style={styles.subtitle}>{user?.email}</Text>
+        </View>
+        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+          <Text style={styles.logoutText}>Atsijungti</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tabRow}>
+        <TabButton id="items" label="Prekės" />
+        <TabButton id="scanAdd" label="Pridėti" />
+        <TabButton id="scanRemove" label="Išduoti" />
+        <TabButton id="departed" label="Išvykusios" />
+      </View>
+
+      <View style={{ flex: 1 }}>
+        {tab === "items" && <ItemsListScreen />}
+        {tab === "scanAdd" && <ScanAddScreen />}
+        {tab === "scanRemove" && <ScanRemoveScreen />}
+        {tab === "departed" && <DepartedListScreen />}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+/* ============== SANDĖLIO PREKIŲ SĄRAŠAS ============== */
+
+function ItemsListScreen() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const unsub = db
+      .collection("items")
+      .orderBy("name")
+      .onSnapshot(
+        (snap) => {
+          const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setItems(data);
+          setLoading(false);
+
+          fadeAnim.setValue(0);
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }).start();
+        },
+        (err) => {
+          console.log(err);
+          setLoading(false);
+        }
+      );
+
+    return unsub;
+  }, [fadeAnim]);
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color="#22c55e" />
+        <Text style={{ color: "#e5e7eb", marginTop: 6 }}>
+          Kraunamos prekės...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+      {items.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>
+            Sandėlyje kol kas nėra prekių.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingBottom: 16 }}
+          renderItem={({ item }) => (
+            <View style={styles.itemCard}>
+              <Text style={styles.itemTitle}>{item.name}</Text>
+              {!!item.description && (
+                <Text style={styles.itemDescription}>
+                  {item.description}
+                </Text>
+              )}
+              <View style={styles.itemRow}>
+                <Text style={styles.itemLabel}>
+                  Kiekis:{" "}
+                  <Text style={styles.itemValue}>
+                    {item.quantity ?? 0}
+                  </Text>
+                </Text>
+                <Text style={styles.itemBarcode}>
+                  Kodas: {item.barcode || item.id}
+                </Text>
+              </View>
+              {item.createdBy?.email && (
+                <Text style={styles.itemMeta}>
+                  Priėmė: {item.createdBy.email}
+                </Text>
+              )}
+            </View>
+          )}
+        />
+      )}
+    </Animated.View>
+  );
+}
+
+/* ============== IŠVYKUSIŲ PREKIŲ SĄRAŠAS ============== */
+
+function DepartedListScreen() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const unsub = db
+      .collection("departedItems")
+      .orderBy("departedAt", "desc")
+      .onSnapshot(
+        (snap) => {
+          const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setItems(data);
+          setLoading(false);
+
+          fadeAnim.setValue(0);
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }).start();
+        },
+        (err) => {
+          console.log(err);
+          setLoading(false);
+        }
+      );
+
+    return unsub;
+  }, [fadeAnim]);
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color="#22c55e" />
+        <Text style={{ color: "#e5e7eb", marginTop: 6 }}>
+          Kraunamos išvykusios prekės...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+      {items.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>
+            Nėra išvykusių prekių.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingBottom: 16 }}
+          renderItem={({ item }) => {
+            const date = item.departedAt?.toDate
+              ? item.departedAt.toDate()
+              : null;
+            const formatted = date
+              ? `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`
+              : "-";
+
+            return (
+              <View style={styles.itemCard}>
+                <Text style={styles.itemTitle}>{item.name}</Text>
+                {!!item.description && (
+                  <Text style={styles.itemDescription}>
+                    {item.description}
+                  </Text>
+                )}
+                <View style={styles.itemRow}>
+                  <Text style={styles.itemLabel}>
+                    Kiekis:{" "}
+                    <Text style={styles.itemValue}>
+                      {item.quantity ?? 1}
+                    </Text>
+                  </Text>
+                  <Text style={styles.itemBarcode}>
+                    Kodas: {item.barcode}
+                  </Text>
+                </View>
+                <Text style={styles.itemMeta}>
+                  Išvykimo data: {formatted}
+                </Text>
+                {item.departedBy?.email && (
+                  <Text style={styles.itemMeta}>
+                    Perdavė: {item.departedBy.email}
+                  </Text>
+                )}
+              </View>
+            );
+          }}
+        />
+      )}
+    </Animated.View>
+  );
+}
+
+/* ============== SKENAVIMAS – PRIDĖJIMAS ============== */
+
+function ScanAddScreen() {
+  const { user } = useAuth();
+  const [hasPermission, setHasPermission] = useState(null);
+  const [scanned, setScanned] = useState(false);
+  const [barcode, setBarcode] = useState(null);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(status === "granted");
+    })();
+  }, []);
+
+  const handleScan = async ({ data }) => {
+    setScanned(true);
+    setBarcode(data);
+
+    try {
+      const docRef = db.collection("items").doc(data);
+      const snap = await docRef.get();
+      if (snap.exists) {
+        const item = snap.data();
+        setName(item.name || "");
+        setDescription(item.description || "");
+        Alert.alert(
+          "Prekė rasta",
+          "Ši prekė jau yra – bus atnaujintas kiekis."
+        );
+      } else {
+        Alert.alert("Nuskaityta", `Kodas: ${data}`);
+      }
+    } catch (e) {
+      Alert.alert("Klaida", e.message);
+    }
+  };
+
+  const saveItem = async () => {
+    if (!barcode) {
+      Alert.alert("Klaida", "Pirmiausia nuskaityk prekės kodą.");
+      return;
+    }
+    if (!name.trim()) {
+      Alert.alert("Klaida", "Įvesk prekės pavadinimą.");
+      return;
+    }
+    const qty = parseInt(quantity, 10);
+    if (isNaN(qty) || qty <= 0) {
+      Alert.alert("Klaida", "Kiekis turi būti teigiamas skaičius.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const docRef = db.collection("items").doc(barcode);
+      const snap = await docRef.get();
+      if (snap.exists) {
+        const currentQty = snap.data().quantity || 0;
+        await docRef.update({
+          quantity: currentQty + qty,
+        });
+      } else {
+        await docRef.set({
+          name: name.trim(),
+          description: description.trim(),
+          quantity: qty,
+          barcode,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          createdBy: {
+            uid: user.uid,
+            email: user.email,
+          },
+        });
+      }
+
+      Alert.alert("Sėkmė", "Prekė išsaugota sandėlyje.");
+      setName("");
+      setDescription("");
+      setQuantity("1");
+      setBarcode(null);
+      setScanned(false);
+    } catch (e) {
+      Alert.alert("Klaida", e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (hasPermission === null) {
+    return (
+      <View style={styles.centered}>
+        <Text style={{ color: "#e5e7eb" }}>Prašoma kameros prieigos...</Text>
+      </View>
+    );
+  }
+  if (hasPermission === false) {
+    return (
+      <View style={styles.centered}>
+        <Text style={{ color: "#fca5a5" }}>
+          Nėra kameros leidimo. Patikrink nustatymus.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={styles.sectionTitle}>Nuskaityk naujos prekės kodą</Text>
+      <View style={styles.scannerBox}>
+        <CameraView
+          style={{ flex: 1 }}
+          onBarcodeScanned={scanned ? undefined : handleScan}
+        />
+        {scanned && (
+          <TouchableOpacity
+            style={styles.scanAgainButton}
+            onPress={() => {
+              setScanned(false);
+              setBarcode(null);
+            }}
+          >
+            <Text style={styles.scanAgainText}>Skenuoti dar kartą</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      {barcode && (
+        <Text style={styles.barcodeInfo}>Kodas: {barcode}</Text>
+      )}
+
+      <View style={styles.formCard}>
+        <Text style={styles.sectionTitle}>Prekės informacija</Text>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Pavadinimas</Text>
+          <TextInput
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="pvz. Monitorius Dell"
+            placeholderTextColor="#6b7280"
+          />
+        </View>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Aprašymas</Text>
+          <TextInput
+            style={[styles.input, { height: 70 }]}
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Trumpas aprašymas (nebūtina)"
+            placeholderTextColor="#6b7280"
+            multiline
+          />
+        </View>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Kiekis</Text>
+          <TextInput
+            style={styles.input}
+            value={quantity}
+            onChangeText={setQuantity}
+            keyboardType="numeric"
+            placeholder="1"
+            placeholderTextColor="#6b7280"
+          />
+        </View>
+
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={saveItem}
+          disabled={saving}
+        >
+          <Text style={styles.primaryButtonText}>
+            {saving ? "Saugoma..." : "Išsaugoti prekę"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+/* ============== SKENAVIMAS – IŠDAVIMAS ============== */
+
+function ScanRemoveScreen() {
+  const { user } = useAuth();
+  const [hasPermission, setHasPermission] = useState(null);
+  const [scanned, setScanned] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(status === "granted");
+    })();
+  }, []);
+
+  const handleScan = async ({ data }) => {
+    setScanned(true);
+
+    try {
+      const docRef = db.collection("items").doc(data);
+      const snap = await docRef.get();
+
+      if (!snap.exists) {
+        Alert.alert("Nerasta", "Tokios prekės sandėlyje nėra.");
+        return;
+      }
+
+      const item = snap.data();
+      const currentQty = item.quantity || 0;
+      const newQty = currentQty - 1;
+
+      if (newQty > 0) {
+        await docRef.update({ quantity: newQty });
+      } else {
+        await docRef.delete();
+      }
+
+      await db.collection("departedItems").add({
+        name: item.name,
+        description: item.description,
+        quantity: 1,
+        barcode: data,
+        departedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        departedBy: {
+          uid: user.uid,
+          email: user.email,
+        },
+      });
+
+      Alert.alert(
+        "Sėkmingai",
+        `Prekė "${item.name}" išduota. Liko: ${Math.max(
+          newQty,
+          0
+        )} vnt.`
+      );
+    } catch (e) {
+      Alert.alert("Klaida", e.message);
+    }
+  };
+
+  if (hasPermission === null) {
+    return (
+      <View style={styles.centered}>
+        <Text style={{ color: "#e5e7eb" }}>Prašoma kameros prieigos...</Text>
+      </View>
+    );
+  }
+  if (hasPermission === false) {
+    return (
+      <View style={styles.centered}>
+        <Text style={{ color: "#fca5a5" }}>
+          Nėra kameros leidimo. Patikrink nustatymus.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={styles.sectionTitle}>
+        Nuskaityk išeinančios prekės kodą
+      </Text>
+      <View style={styles.scannerBox}>
+        <CameraView
+          style={{ flex: 1 }}
+          onBarcodeScanned={scanned ? undefined : handleScan}
+        />
+        {scanned && (
+          <TouchableOpacity
+            style={styles.scanAgainButton}
+            onPress={() => setScanned(false)}
+          >
+            <Text style={styles.scanAgainText}>Skenuoti dar kartą</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
+/* ============== STILIAI ============== */
+
+const styles = StyleSheet.create({
+  centered: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  authContainer: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  authCard: {
+    backgroundColor: "#020617",
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+  appTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#e5e7eb",
+  },
+  appSubtitle: {
+    color: "#9ca3af",
+    marginBottom: 16,
+    marginTop: 4,
+  },
+  inputGroup: {
+    marginBottom: 12,
+  },
+  inputLabel: {
+    color: "#cbd5f5",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  input: {
+    backgroundColor: "#0b1120",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: "#e5e7eb",
+    borderWidth: 1,
+    borderColor: "#1f2937",
+    fontSize: 14,
+  },
+  primaryButton: {
+    backgroundColor: "#22c55e",
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  primaryButtonText: {
+    color: "#022c22",
+    fontWeight: "600",
+    fontSize: 15,
+  },
+  mainContainer: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#e5e7eb",
+  },
+  subtitle: {
+    fontSize: 12,
+    color: "#9ca3af",
+    marginTop: 2,
+  },
+  logoutButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#4b5563",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  logoutText: {
+    color: "#e5e7eb",
+    fontSize: 12,
+  },
+  tabRow: {
+    flexDirection: "row",
+    backgroundColor: "#020617",
+    borderRadius: 999,
+    padding: 4,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  tabButtonActive: {
+    backgroundColor: "#22c55e",
+  },
+  tabButtonText: {
+    color: "#9ca3af",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  tabButtonTextActive: {
+    color: "#022c22",
+  },
+  emptyBox: {
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: "#020617",
+    marginTop: 8,
+  },
+  emptyText: {
+    color: "#94a3b8",
+    fontSize: 14,
+  },
+  itemCard: {
+    backgroundColor: "#020617",
+    borderRadius: 16,
+    padding: 12,
+    marginVertical: 6,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+  itemTitle: {
+    color: "#e5e7eb",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  itemDescription: {
+    color: "#9ca3af",
+    fontSize: 13,
+    marginTop: 4,
+  },
+  itemRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 8,
+    alignItems: "center",
+  },
+  itemLabel: {
+    color: "#cbd5f5",
+    fontSize: 13,
+  },
+  itemValue: {
+    fontWeight: "700",
+  },
+  itemBarcode: {
+    color: "#64748b",
+    fontSize: 12,
+  },
+  itemMeta: {
+    marginTop: 4,
+    color: "#64748b",
+    fontSize: 12,
+  },
+  sectionTitle: {
+    color: "#e5e7eb",
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 6,
+    marginTop: 4,
+    paddingHorizontal: 4,
+  },
+  scannerBox: {
+    borderRadius: 16,
+    overflow: "hidden",
+    height: 260,
+    backgroundColor: "#020617",
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+  scanAgainButton: {
+    position: "absolute",
+    bottom: 10,
+    alignSelf: "center",
+    backgroundColor: "rgba(15,23,42,0.85)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  scanAgainText: {
+    color: "#e5e7eb",
+    fontSize: 12,
+  },
+  barcodeInfo: {
+    marginTop: 6,
+    marginHorizontal: 8,
+    color: "#cbd5f5",
+    fontSize: 13,
+  },
+  formCard: {
+    backgroundColor: "#020617",
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 10,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+});
